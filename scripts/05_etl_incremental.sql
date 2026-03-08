@@ -1,11 +1,12 @@
+-- =============================================
+-- Flexer DWH
+-- 05_etl_incremental.sql
+-- Carga incremental diaria
+-- Extrae solo registros nuevos desde last_load_date
+-- =============================================
+
 USE FlexerDWH;
 GO
-
--- =============================================
--- ETL CARGA INCREMENTAL
--- Ejecutar diariamente - extrae solo registros
--- nuevos desde last_load_date
--- =============================================
 
 DECLARE @last_load_date DATETIME2;
 DECLARE @rows_users     INT = 0;
@@ -14,11 +15,9 @@ DECLARE @rows_workouts  INT = 0;
 DECLARE @rows_sets      INT = 0;
 DECLARE @rows_llm       INT = 0;
 
--- Obtener última fecha de carga
+-- Obtener ultima fecha de carga
 SELECT @last_load_date = last_load_date
 FROM dwh.etl_control
-WHERE process_name = 'incremental_load'
-   OR process_name = 'historical_load'
 ORDER BY executed_at DESC
 OFFSET 0 ROWS FETCH NEXT 1 ROWS ONLY;
 
@@ -44,6 +43,8 @@ SET @rows_users = @@ROWCOUNT;
 -- 2. CAMBIOS EN USUARIOS EXISTENTES (SCD Type 2)
 -- Detecta usuarios que cambiaron de tier
 -- =============================================
+
+-- Cerrar version anterior
 UPDATE dwh.dim_users
 SET valid_to   = GETDATE(),
     is_current = 0
@@ -56,6 +57,7 @@ WHERE is_current = 1
       AND u.tier != d.tier
 );
 
+-- Insertar nueva version
 INSERT INTO dwh.dim_users (
     user_id, name, phone, tier, timezone, registered_at, valid_from, valid_to, is_current
 )
@@ -79,7 +81,7 @@ SELECT
     e.id, e.name, mg.name, mt.name, e.is_compound,
     e.created_at, NULL, 1
 FROM oltp.exercises e
-JOIN oltp.muscle_groups mg ON mg.id = e.muscle_group_id
+JOIN oltp.muscle_groups mg  ON mg.id = e.muscle_group_id
 JOIN oltp.movement_types mt ON mt.id = e.movement_type_id
 WHERE e.created_at > @last_load_date
   AND NOT EXISTS (
@@ -184,7 +186,7 @@ WHERE ll.parsed_at > @last_load_date
 SET @rows_llm = @@ROWCOUNT;
 
 -- =============================================
--- 7. REGISTRAR EN ETL CONTROL
+-- 7. Registrar en etl_control
 -- =============================================
 INSERT INTO dwh.etl_control (process_name, last_load_date, rows_inserted, status)
 VALUES (
@@ -194,7 +196,7 @@ VALUES (
     'success'
 );
 
--- Resumen de la carga
+-- Resumen
 SELECT
     'incremental_load'  AS process,
     @rows_users         AS new_users,
